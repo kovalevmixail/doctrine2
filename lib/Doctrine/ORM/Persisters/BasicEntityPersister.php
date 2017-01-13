@@ -812,17 +812,13 @@ class BasicEntityPersister
 
         // TRICKY: since the association is specular source and target are flipped
         foreach ($owningAssoc['targetToSourceKeyColumns'] as $sourceKeyColumn => $targetKeyColumn) {
-            if ( ! isset($sourceClass->fieldNames[$sourceKeyColumn])) {
-                throw MappingException::joinColumnMustPointToMappedField(
-                    $sourceClass->name, $sourceKeyColumn
-                );
-            }
-
             // unset the old value and set the new sql aliased value here. By definition
             // unset($identifier[$targetKeyColumn] works here with how UnitOfWork::createEntity() calls this method.
-            $identifier[$this->getSQLTableAlias($targetClass->name) . "." . $targetKeyColumn] =
-                $sourceClass->reflFields[$sourceClass->fieldNames[$sourceKeyColumn]]->getValue($sourceEntity);
-
+            $identifier[$this->getSQLTableAlias($targetClass->name) . "." . $targetKeyColumn] = $this->getSomeValue(
+                $sourceClass,
+                $sourceKeyColumn,
+                $sourceEntity
+            );
             unset($identifier[$targetKeyColumn]);
         }
 
@@ -1978,5 +1974,37 @@ class BasicEntityPersister
 
         $sql = implode(' AND ', $filterClauses);
         return $sql ? "(" . $sql . ")" : ""; // Wrap again to avoid "X or Y and FilterConditionSQL"
+    }
+
+    /**
+     * @param ClassMetadata $sourceClass
+     * @param               $column
+     * @param               $source
+     * @return mixed
+     * @throws MappingException
+     */
+    protected function getSomeValue(ClassMetadata $sourceClass, $column, $source)
+    {
+        $refProperty = null;
+
+        if (isset($sourceClass->fieldNames[$column])) {
+            $refProperty = $sourceClass->reflFields[$sourceClass->fieldNames[$column]];
+        } else {
+            foreach ($sourceClass->parentClasses as $parentClass) {
+                $parentMetadata = $this->em->getClassMetadata($parentClass);
+                if (isset($parentMetadata->fieldNames[$column])) {
+                    $refProperty = $parentMetadata->reflFields[$sourceClass->fieldNames[$column]];
+                    break;
+                }
+            }
+        }
+
+        if (null === $refProperty) {
+            throw MappingException::joinColumnMustPointToMappedField(
+                $sourceClass->name, $column
+            );
+        }
+
+        return $refProperty->getValue($source);
     }
 }
